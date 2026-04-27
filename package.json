@@ -1,0 +1,83 @@
+{
+  "name": "content-broadcasting-system",
+  "version": "1.0.0",
+  "description": "Backend system for broadcasting subject-based content",
+  "main": "src/app.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/app.js",
+    "dev": "nodemon src/app.js",
+    "postinstall": "prisma generate",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:push": "prisma db push",
+    "test": "jest --runInBand --forceExit --selectProjects unit",
+    "test:integration": "jest --runInBand --forceExit --selectProjects integration",
+    "test:all": "jest --runInBand --forceExit",
+    "test:coverage": "jest --runInBand --forceExit --coverage --selectProjects unit"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "transform": {
+      "^.+\\.js$": "babel-jest"
+    },
+    "projects": [
+      {
+        "displayName": "unit",
+        "testMatch": [
+          "<rootDir>/tests/*.test.js"
+        ],
+        "transform": {
+          "^.+\\.js$": "babel-jest"
+        },
+        "setupFiles": [
+          "<rootDir>/tests/env.js"
+        ],
+        "setupFilesAfterEnv": [
+          "<rootDir>/tests/setup.js"
+        ],
+        "clearMocks": true,
+        "testTimeout": 15000
+      },
+      {
+        "displayName": "integration",
+        "testMatch": [
+          "<rootDir>/tests/integration/*.test.js"
+        ],
+        "transform": {
+          "^.+\\.js$": "babel-jest"
+        },
+        "setupFiles": [
+          "<rootDir>/tests/integration/env.js"
+        ],
+        "setupFilesAfterEnv": [
+          "<rootDir>/tests/integration/setup.js"
+        ],
+        "clearMocks": false,
+        "testTimeout": 60000
+      }
+    ]
+  },
+  "dependencies": {
+    "@prisma/client": "^5.10.0",
+    "bcryptjs": "^2.4.3",
+    "dotenv": "^16.4.5",
+    "express": "^4.18.3",
+    "express-rate-limit": "^7.2.0",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^1.4.5-lts.1"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.24.0",
+    "@babel/preset-env": "^7.24.0",
+    "babel-jest": "^29.7.0",
+    "babel-plugin-transform-import-meta": "^2.3.3",
+    "jest": "^30.3.0",
+    "nodemon": "^3.1.0",
+    "prisma": "^5.10.0",
+    "supertest": "^7.2.2"
+  }
+}

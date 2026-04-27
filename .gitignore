@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+
+# Environment — never commit real credentials
+.env
+
+# Prisma generated client
+node_modules/.prisma/
+
+# Uploaded files — keep the folder, ignore contents
+uploads/*
+!uploads/.gitkeep
+
+# Test fixture images generated at runtime
+tests/_fixture*.jpg
+tests/_fixture*.txt
+tests/integration/_fixture*.jpg
+tests/integration/_fixture*.txt
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Coverage
+coverage/

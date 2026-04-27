@@ -1,0 +1,152 @@
+
+ARCHITECTURE NOTES
+
+
+--- FOLDER STRUCTURE ---
+
+src/
+  app.js              - Express app entry point, middleware setup, route mounting
+  config/
+    prisma.js         - Singleton Prisma client
+    multer.js         - Multer storage config (local disk, file filter, size limit)
+  controllers/        - Thin request/response handlers, delegate to services
+  services/           - All business logic lives here
+  routes/             - Route definitions with middleware chains
+  middlewares/
+    auth.middleware.js    - JWT verification + RBAC enforcement
+    error.middleware.js   - Multer error handler + global error handler
+    validate.middleware.js - Input validation per route (including date cross-validation)
+  utils/
+    jwt.js            - signToken / verifyToken helpers
+    response.js       - Standardized sendSuccess / sendError helpers
+prisma/
+  schema.prisma       - DB schema (User, Content, enums)
+uploads/              - Local file storage for uploaded images
+tests/
+  *.test.js           - Unit tests (Prisma mocked via Babel + jest.mock)
+  integration/        - Integration tests (real PostgreSQL, full pipeline)
+
+All source files use ES Modules (import/export). Babel transforms ESM → CJS
+for Jest compatibility (babel-plugin-transform-import-meta handles import.meta.url).
+
+
+--- RBAC FLOW ---
+
+1. User registers with a role (teacher or principal). Default role is teacher.
+2. On login, a JWT is issued containing { id, email, role }.
+3. The `authenticate` middleware verifies the JWT on all protected routes.
+4. The `authorize(...roles)` middleware checks req.user.role against allowed roles.
+5. Role enforcement per route:
+   - POST /content/upload      → teacher only
+   - GET  /content/my          → teacher only
+   - GET  /content/my/:id      → teacher only (ownership enforced in service layer)
+   - GET  /content/pending     → principal only
+   - PATCH /content/:id/approve → principal only
+   - PATCH /content/:id/reject  → principal only
+   - GET  /content/live/:id    → public (no auth)
+6. Ownership check: a teacher can only view their own content via GET /content/my/:id.
+   The service layer compares content.uploaded_by === req.user.id and throws 403 if not.
+
+
+--- SCHEDULING LOGIC ---
+
+Goal: At any given moment, determine which content item is "active" per subject.
+
+Rules:
+- Content must have status = 'approved'
+- Current time must be within [start_time, end_time]
+- Each subject rotates independently
+
+Algorithm (per subject):
+1. Fetch all approved, in-window content for the teacher, sorted by created_at ASC.
+2. Assign each item a rotation slot = rotation_duration (default 5 min) in milliseconds.
+3. Compute total cycle = sum of all slot durations.
+4. Compute anchor = start_time of the first item (or created_at as fallback).
+5. elapsed = (now - anchor) % totalCycle
+6. Walk through slots accumulating durations until elapsed < accumulated → that item is active.
+
+Example:
+  Items: A(5min), B(5min), C(5min) → totalCycle = 15min
+  If elapsed = 7min  → cursor passes A(5), then B(10) → B is active
+  If elapsed = 13min → cursor passes A(5), B(10), C(15) → C is active
+  At 15min it loops back to A.
+
+This is stateless — no cron jobs or background workers needed.
+The active item is computed purely from the current timestamp on each request.
+All clients see the same active item at the same moment (deterministic).
+
+
+--- DB DESIGN ---
+
+Users:
+  - UUID primary key (uuid())
+  - role enum: principal | teacher (default: teacher)
+  - password stored as bcrypt hash (cost factor 12)
+  - email is unique (indexed)
+
+Content:
+  - UUID primary key
+  - Foreign key to Users (uploaded_by → required, approved_by → nullable)
+  - status enum: pending | approved | rejected (default: pending)
+  - file_path stores the absolute local path; file_url is derived at response time
+  - start_time / end_time are nullable — NULL means content never appears in live feed
+  - rotation_duration is nullable — defaults to 5 min in application logic
+  - rejection_reason is nullable — only set on rejection
+
+Indexes (auto-created by Prisma):
+  - users.email (unique constraint → implicit index)
+  - content.uploaded_by (FK → implicit index)
+  - content.approved_by (FK → implicit index)
+
+Scalability notes:
+  - For high-traffic live feed queries, add a composite index on
+    (uploaded_by, status, start_time, end_time) to avoid full table scans.
+  - Pagination is implemented on GET /content/my and GET /content/pending
+    using skip/take with a parallel count query.
+
+
+--- SECURITY ---
+
+- Passwords hashed with bcrypt (cost 12)
+- JWT signed with HS256, configurable expiry via JWT_EXPIRES_IN env var
+- File uploads restricted to jpg/png/gif by extension check, max 10MB
+- Full server file paths never exposed in API responses (only /uploads/filename)
+- Rate limiting: 100 requests per 15 minutes per IP (express-rate-limit)
+- Input validation on all write endpoints (missing fields, date formats, cross-field)
+- Sensitive fields (password_hash, file_path, uploaded_by, approved_by) stripped from responses
+- Ownership enforced at service layer for teacher content access
+
+
+--- VALIDATION RULES ---
+
+Register:
+  - name, email, password required
+  - email must match RFC-style regex
+  - password minimum 6 characters
+  - role must be 'teacher' or 'principal' if provided
+
+Content Upload:
+  - title and subject required (whitespace-only rejected)
+  - file required (jpg/png/gif only, max 10MB)
+  - start_time / end_time must be valid ISO 8601 if provided
+  - end_time must be after start_time if both provided
+  - rotation_duration must be a positive integer if provided
+
+Rejection:
+  - reason required and cannot be blank whitespace
+
+
+--- EDGE CASES HANDLED ---
+
+- No approved content for teacher → "No content available"
+- Approved content outside time window → excluded from live feed
+- Approved content before start_time → excluded from live feed
+- Single content item per subject → returned directly (no rotation math needed)
+- rotation_duration = null → defaults to 5 minutes
+- Cycle boundary (elapsed = totalCycle exactly) → wraps to first item (modulo)
+- Double-approve / double-reject → 400 with descriptive message
+- Teacher accessing another teacher's content → 403
+- Principal ID passed to /live/:teacherId → 404
+- Non-existent teacher ID → 404
+- Invalid file type → 400 (multer fileFilter)
+- File too large → 400 (multer size limit)
