@@ -23,7 +23,7 @@ app.use(rateLimit({
 app.use('/auth', authRoutes);
 app.use('/content', contentRoutes);
 
-app.get('/health', (_req, res) => {
+app.get('/', (_req, res) => {
   res.json({ success: true, message: 'Server is running', timestamp: new Date().toISOString() });
 });
 
